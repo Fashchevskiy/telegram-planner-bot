@@ -1,12 +1,12 @@
 import asyncio
 import logging
 import sqlite3
+import os
 from datetime import datetime, timedelta
+from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,6 +16,17 @@ dp = Dispatcher()
 
 logging.basicConfig(level=logging.INFO)
 
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
 
 def init_db():
     with sqlite3.connect("planner.db") as conn:
@@ -30,7 +41,6 @@ def init_db():
         ''')
         conn.commit()
 
-
 def add_plan(user_id, date_str, text):
     with sqlite3.connect("planner.db") as conn:
         cursor = conn.cursor()
@@ -38,20 +48,17 @@ def add_plan(user_id, date_str, text):
                        (user_id, date_str, text))
         conn.commit()
 
-
 def get_plans(user_id, date_str):
     with sqlite3.connect("planner.db") as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT plan_text FROM plans WHERE user_id = ? AND plan_date = ?", (user_id, date_str))
         return cursor.fetchall()
 
-
 def clear_plans(user_id, date_str):
     with sqlite3.connect("planner.db") as conn:
         cursor = conn.cursor()
         cursor.execute("DELETE FROM plans WHERE user_id = ? AND plan_date = ?", (user_id, date_str))
         conn.commit()
-
 
 def get_week_keyboard():
     builder = InlineKeyboardBuilder()
@@ -69,7 +76,6 @@ def get_week_keyboard():
     builder.adjust(2)
     return builder.as_markup()
 
-
 def get_day_options(date_str):
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Додати план", callback_data=f"add_{date_str}")
@@ -78,16 +84,13 @@ def get_day_options(date_str):
     builder.adjust(1)
     return builder.as_markup()
 
-
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer("Оберіть день:", reply_markup=get_week_keyboard())
 
-
 @dp.callback_query(F.data == "back_to_week")
 async def back_to_week(callback: types.CallbackQuery):
     await callback.message.edit_text("Оберіть день:", reply_markup=get_week_keyboard())
-
 
 @dp.callback_query(F.data.startswith("day_"))
 async def show_day_plans(callback: types.CallbackQuery):
@@ -102,9 +105,7 @@ async def show_day_plans(callback: types.CallbackQuery):
             text += f"{i}. {p[0]}\n"
     await callback.message.edit_text(text, reply_markup=get_day_options(date_str))
 
-
 user_waiting_input = {}
-
 
 @dp.callback_query(F.data.startswith("add_"))
 async def ask_plan_text(callback: types.CallbackQuery):
@@ -112,7 +113,6 @@ async def ask_plan_text(callback: types.CallbackQuery):
     user_waiting_input[callback.from_user.id] = date_str
     await callback.message.answer(f"Напишіть план на {date_str}:")
     await callback.answer()
-
 
 @dp.message(F.text)
 async def process_plan_input(message: types.Message):
@@ -124,14 +124,12 @@ async def process_plan_input(message: types.Message):
     else:
         await message.answer("Використовуйте меню", reply_markup=get_week_keyboard())
 
-
 @dp.callback_query(F.data.startswith("clear_"))
 async def clear_day(callback: types.CallbackQuery):
     date_str = callback.data.split("_")[1]
     clear_plans(callback.from_user.id, date_str)
     await callback.answer("Очищено")
     await show_day_plans(callback)
-
 
 async def daily_notification():
     while True:
@@ -155,12 +153,14 @@ async def daily_notification():
             await asyncio.sleep(61)
         await asyncio.sleep(30)
 
-
 async def main():
     init_db()
+    asyncio.create_task(start_web_server())
     asyncio.create_task(daily_notification())
     await dp.start_polling(bot)
 
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
