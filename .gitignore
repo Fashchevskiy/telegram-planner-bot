@@ -1,0 +1,5 @@
+.env
+.venv/
+planner.db
+__pycache__/
+.idea/
